@@ -640,7 +640,21 @@
             });
         }
 
-        $("#puppetdetails").load("{% url "puppet-details" device=device.pk %}");
-        $("#softwaredetails").load("{% url "puppet-software" device=device.pk %}");
+        $("#puppetdetails").load("{% url "puppet-details" device=device.pk %}", function() {
+            $("#puppetdetails_table").dataTable({
+                "bFilter": false,
+                "paging": true,
+                "searching": true,
+            });
+        });
+        $("#softwaredetails").load("{% url "puppet-software" device=device.pk %}", function() {
+            $("#puppetsoftware_table").dataTable({
+                "bFilter": false,
+                "paging": true,
+                "searching": true,
+            });
+        });
+
+
     });
 {% endblock %}
