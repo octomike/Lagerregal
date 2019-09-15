@@ -1,31 +1,38 @@
-from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView, FormView
-from django.urls import reverse_lazy
-from django.utils.translation import ugettext_lazy as _
-from django.urls import reverse
 from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.shortcuts import render
 from django.db.models import Q
+from django.urls import reverse
+from django.urls import reverse_lazy
+from django.utils.translation import ugettext_lazy as _
+from django.views.generic import CreateView
+from django.views.generic import DeleteView
+from django.views.generic import DetailView
+from django.views.generic import FormView
+from django.views.generic import ListView
+from django.views.generic import UpdateView
 
 from reversion import revisions as reversion
 
-from network.models import IpAddress
-from network.forms import ViewForm, IpAddressForm, UserIpAddressForm
 from devices.forms import FilterForm
 from Lagerregal.utils import PaginationMixin
+from network.forms import IpAddressForm
+from network.forms import UserIpAddressForm
+from network.forms import ViewForm
+from network.models import IpAddress
 from users.mixins import PermissionRequiredMixin
 from users.models import Lageruser
 
 
 class IpAddressList(PermissionRequiredMixin, PaginationMixin, ListView):
     context_object_name = 'ipaddress_list'
-    permission_required = 'network.read_ipaddress'
+    permission_required = 'network.view_ipaddress'
 
     def get_queryset(self):
-        self.usagefilter = self.kwargs.get("usage", "all")
-        self.filterstring = self.kwargs.get("filter", "")
-        if self.usagefilter == "all":
+        self.viewfilter = self.request.GET.get("category", "all")
+        self.filterstring = self.request.GET.get("filter", "")
+        if self.viewfilter == "all":
             addresses = IpAddress.objects.all()
         elif self.usagefilter == "free":
             addresses = IpAddress.objects.filter(device=None, user=None)
@@ -39,9 +46,9 @@ class IpAddressList(PermissionRequiredMixin, PaginationMixin, ListView):
             addresses = IpAddress.objects.all()
 
         if self.request.user.departments.count() > 0:
-            self.departmentfilter = self.kwargs.get("department", "my")
+            self.departmentfilter = self.request.GET.get("department", "my")
         else:
-            self.departmentfilter = self.kwargs.get("department", "all")
+            self.departmentfilter = self.request.GET.get("department", "all")
 
         if self.departmentfilter != "all" and self.departmentfilter != "my":
             addresses = addresses.filter(Q(department__id=self.departmentfilter)
@@ -58,11 +65,11 @@ class IpAddressList(PermissionRequiredMixin, PaginationMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["viewform"] = ViewForm(initial={
-            "usagefilter": self.usagefilter,
-            "departmentfilter": self.departmentfilter
+            'category': self.viewfilter,
+            "department": self.departmentfilter,
         })
         context["filterform"] = FilterForm(initial={
-            "filterstring": self.filterstring
+            "filter": self.filterstring
         })
         context["breadcrumbs"] = [(reverse("device-list"), _("IP-Addresses"))]
 
@@ -74,7 +81,7 @@ class IpAddressList(PermissionRequiredMixin, PaginationMixin, ListView):
 class IpAddressDetail(PermissionRequiredMixin, DetailView):
     model = IpAddress
     context_object_name = 'ipaddress'
-    permission_required = 'network.read_ipaddress'
+    permission_required = 'network.view_ipaddress'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -139,6 +146,7 @@ class IpAddressUpdate(PermissionRequiredMixin, UpdateView):
 
 
 class IpAddressDelete(PermissionRequiredMixin, DeleteView):
+    template_name = 'devices/base_delete.html'
     model = IpAddress
     success_url = reverse_lazy('ipaddress-list')
     permission_required = 'network.delete_ipaddress'
@@ -175,21 +183,23 @@ class UserIpAddress(PermissionRequiredMixin, FormView):
     success_url = "/devices"
     permission_required = 'users.change_user'
 
+    def dispatch(self, request, **kwargs):
+        self.object = get_object_or_404(Lageruser, pk=self.kwargs['pk'])
+        return super().dispatch(request, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        user = context["form"].cleaned_data["user"]
         context["breadcrumbs"] = [
             (reverse("user-list"), _("Users")),
-            (reverse("userprofile", kwargs={"pk": user.pk}), str(user)),
+            (reverse("userprofile", kwargs={"pk": self.object.pk}), str(self.object)),
             ("", _("Assign IP-Addresses"))]
         return context
 
     def form_valid(self, form):
         ipaddresses = form.cleaned_data["ipaddresses"]
-        user = form.cleaned_data["user"]
-        reversion.set_comment(_("Assigned to User {0}").format(str(user)))
+        reversion.set_comment(_("Assigned to User {0}").format(str(self.object)))
         for ipaddress in ipaddresses:
-            ipaddress.user = user
+            ipaddress.user = self.object
             ipaddress.save()
 
-        return HttpResponseRedirect(reverse("userprofile", kwargs={"pk": user.pk}))
+        return HttpResponseRedirect(reverse("userprofile", kwargs={"pk": self.object.pk}))

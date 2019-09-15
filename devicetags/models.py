@@ -1,6 +1,6 @@
 from django.db import models
-from django.utils.translation import ugettext_lazy as _
 from django.urls import reverse
+from django.utils.translation import ugettext_lazy as _
 
 from devices.models import Device
 
@@ -16,9 +16,6 @@ class Devicetag(models.Model):
     class Meta:
         verbose_name = _('Devicetag')
         verbose_name_plural = _('Devicegtag')
-        permissions = (
-            ("read_devicetag", _("Can read Devicetag")),
-        )
 
     def get_absolute_url(self):
         return reverse('devicetag-edit', kwargs={'pk': self.pk})

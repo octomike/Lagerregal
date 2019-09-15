@@ -1,42 +1,122 @@
+import csv
 import datetime
 import time
-import csv
 
-from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView, View, FormView
-from django.views.generic.detail import SingleObjectTemplateResponseMixin, BaseDetailView, SingleObjectMixin
-from django.urls import reverse_lazy, reverse
-from django.contrib.auth.models import Group
-from django.shortcuts import render
-from reversion.models import Version
-from django.shortcuts import get_object_or_404
-from django.http import HttpResponseRedirect, HttpResponseBadRequest, HttpResponse
-from django.contrib import messages
-from django.utils.timezone import utc
-from django.utils import timezone
-from reversion import revisions as reversion
-from django.utils.translation import ugettext_lazy as _
-from django.contrib.contenttypes.models import ContentType
-from django.db.transaction import atomic
 from django.conf import settings
-from django.db.models.query import QuerySet
-from django.db import models
+from django.contrib import messages
+from django.contrib.auth.models import Group
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import SuspiciousOperation
-from django.http import Http404
-
-from devices.models import Device, Template, Room, Building, Manufacturer, Lending, Note, Bookmark, Picture
-from devicetypes.models import TypeAttribute, TypeAttributeValue
-from network.models import IpAddress
-from mail.models import MailTemplate, MailHistory
-from devices.forms import IpAddressForm, LendForm, DeviceViewForm, IpAddressPurposeForm
-from devices.forms import ViewForm, DeviceForm, DeviceMailForm, VIEWSORTING, VIEWSORTING_DEVICES, FilterForm, \
-    DeviceStorageForm, ReturnForm, DeviceGroupFilterForm
-from devicetags.forms import DeviceTagForm
-from users.mixins import PermissionRequiredMixin
-from users.models import Lageruser, Department
-from Lagerregal.utils import PaginationMixin
-from devicetags.models import Devicetag
+from django.db import models
 from django.db.models import Q
+from django.db.transaction import atomic
+from django.http import Http404
+from django.http import HttpResponse
+from django.http import HttpResponseBadRequest
+from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+from django.shortcuts import render
+from django.urls import reverse
+from django.urls import reverse_lazy
+from django.utils import timezone
+from django.utils.timezone import utc
+from django.utils.translation import ugettext_lazy as _
+from django.views.generic import CreateView
+from django.views.generic import DeleteView
+from django.views.generic import DetailView
+from django.views.generic import FormView
+from django.views.generic import ListView
+from django.views.generic import UpdateView
+from django.views.generic import View
+from django.views.generic.detail import BaseDetailView
+from django.views.generic.detail import SingleObjectMixin
+from django.views.generic.detail import SingleObjectTemplateResponseMixin
+
+from reversion import revisions as reversion
+from reversion.models import Version
+
+from devices.forms import VIEWSORTING
+from devices.forms import VIEWSORTING_DEVICES
+from devices.forms import DeviceForm
+from devices.forms import DeviceGroupFilterForm
+from devices.forms import DeviceMailForm
+from devices.forms import DeviceStorageForm
+from devices.forms import DeviceViewForm
+from devices.forms import FilterForm
+from devices.forms import IpAddressForm
+from devices.forms import IpAddressPurposeForm
+from devices.forms import LendForm
+from devices.forms import ReturnForm
+from devices.forms import ViewForm
+from devices.models import Bookmark
+from devices.models import Building
+from devices.models import Device
+from devices.models import Lending
+from devices.models import Manufacturer
+from devices.models import Note
+from devices.models import Picture
+from devices.models import Room
+from devices.models import Template
+from devicetags.forms import DeviceTagForm
+from devicetags.models import Devicetag
+from devicetypes.models import TypeAttribute
+from devicetypes.models import TypeAttributeValue
+from Lagerregal.utils import PaginationMixin
+from mail.models import MailHistory
+from mail.models import MailTemplate
+from network.models import IpAddress
+from users.mixins import PermissionRequiredMixin
+from users.models import Lageruser
+
+
+def get_devices(user, category, department, sorting):
+    if category == "all":
+        devices = Device.objects.all()
+    elif category == "available":
+        devices = Device.active().filter(currentlending=None)
+    elif category == "lent":
+        lendings = Lending.objects.filter(returndate=None)
+        devices = Device.objects.filter(lending__in=lendings)
+    elif category == "archived":
+        devices = Device.objects.exclude(archived=None)
+    elif category == "trashed":
+        devices = Device.objects.exclude(trashed=None)
+    elif category == "overdue":
+        lendings = Lending.objects.filter(returndate=None, duedate__lt=datetime.date.today())
+        devices = Device.objects.filter(lending__in=lendings)
+    elif category == "returnsoon":
+        soon = datetime.date.today() + datetime.timedelta(days=10)
+        lendings = Lending.objects.filter(returndate=None, duedate__lte=soon,
+                                          duedate__gt=datetime.date.today())
+        devices = Device.objects.filter(lending__in=lendings)
+    elif category == "temporary":
+        devices = Device.active().filter(templending=True)
+    elif category == "bookmark" and user.is_authenticated:
+        devices = user.bookmarks.all()
+    elif category == "active":
+        devices = Device.active()
+    else:
+        raise ValueError
+
+    if department == "all":
+        pass
+    elif department == "my":
+        devices = devices.filter(department__in=user.departments.all())
+    elif department.isdigit():
+        devices = devices.filter(department_id=int(department))
+    else:
+        raise ValueError
+
+    if sorting not in [s[0] for s in VIEWSORTING_DEVICES]:
+        raise ValueError
+
+    if hasattr(user, 'departments'):
+        devices = devices.exclude(~Q(department__in=user.departments.all()), is_private=True)
+    else:
+        devices = devices.exclude(is_private=True)
+
+    return devices.order_by(sorting)
 
 
 class DeviceList(PermissionRequiredMixin, PaginationMixin, ListView):
@@ -44,7 +124,7 @@ class DeviceList(PermissionRequiredMixin, PaginationMixin, ListView):
     template_name = 'devices/device_list.html'
     viewfilter = None
     viewsorting = None
-    permission_required = 'devices.read_device'
+    permission_required = 'devices.view_device'
 
     def post(self, request):
         '''post-requesting the detail-view of device by id'''
@@ -55,83 +135,17 @@ class DeviceList(PermissionRequiredMixin, PaginationMixin, ListView):
 
     def get_queryset(self):
         '''method for query results and display it depending on existing filters (viewfilter, department)'''
-        self.viewfilter = self.kwargs.get("filter", "active")
-        devices = None
-        lendings = None
+        self.viewfilter = self.request.GET.get("category", "active")
 
-        # filtering devices by status
-        # possible status: all, active, lent, archived, trash, overdue,
-        # return soon, short term, bookmarked
-        if self.viewfilter == "all":
-            devices = Device.objects.all()
-        elif self.viewfilter == "available":
-            devices = Device.active().filter(currentlending=None)
-        elif self.viewfilter == "lent":
-            lendings = Lending.objects.filter(returndate=None)
-        elif self.viewfilter == "archived":
-            devices = Device.objects.exclude(archived=None)
-        elif self.viewfilter == "trashed":
-            devices = Device.objects.exclude(trashed=None)
-        elif self.viewfilter == "overdue":
-            lendings = Lending.objects.filter(returndate=None, duedate__lt=datetime.date.today())
-        elif self.viewfilter == "returnsoon":
-            soon = datetime.date.today() + datetime.timedelta(days=10)
-            lendings = Lending.objects.filter(returndate=None, duedate__lte=soon,
-                                              duedate__gt=datetime.date.today())
-        elif self.viewfilter == "temporary":
-            devices = Device.active().filter(templending=True)
-        elif self.viewfilter == "bookmark":
-            if self.request.user.is_authenticated:
-                devices = self.request.user.bookmarks.all()
+        if hasattr(self.request.user, 'departments') and self.request.user.departments.count() > 0:
+            self.departmentfilter = self.request.GET.get("department", "my")
         else:
-            devices = Device.active()
+            self.departmentfilter = self.request.GET.get("department", "all")
 
-        self.departmentfilter = self.kwargs.get("department", "all")
-        # if user has departments: set departments as filter
-        if hasattr(self.request.user, 'departments'):
-            if self.request.user.departments.count() > 0:
-                self.departmentfilter = self.kwargs.get("department", "my")
+        self.viewsorting = self.request.GET.get("sorting", "name")
 
-        if self.departmentfilter != "all" and self.departmentfilter != "my":
-            try:
-                departmentid = int(self.departmentfilter)
-                self.departmentfilter = Department.objects.get(id=departmentid)
-            except:
-                self.departmentfilter = Department.objects.get(name=self.departmentfilter)
-
-        if self.departmentfilter == "my":
-            self.departmentfilter = self.request.user.departments.all()
-
-        # filtering lent or overdue devices
-        if self.viewfilter == "lent" or self.viewfilter == "overdue" or self.viewfilter == "returnsoon":
-            if isinstance(self.departmentfilter, (list, tuple, QuerySet)):
-                lendings = lendings.filter(owner__departments__in=self.departmentfilter)
-                self.departmentfilter = "my"
-            elif self.departmentfilter != "all":
-                lendings = lendings.filter(owner__departments=self.departmentfilter)
-                self.departmentfilter = self.departmentfilter.id
-            lendings = lendings.exclude(~Q(device__department__in=self.request.user.departments.all())
-                                        & ~Q(device=None), device__is_private=True)
-            return lendings.values("device__id", "device__name", "device__inventorynumber",
-                                   "device__devicetype__name", "device__room__name", "device__group",
-                                   "device__room__building__name", "owner__username", "owner__id",
-                                   "duedate", "smalldevice")
-        else:
-            if isinstance(self.departmentfilter, (list, tuple, QuerySet)):
-                devices = devices.filter(department__in=self.departmentfilter)
-                self.departmentfilter = "my"
-            elif self.departmentfilter != "all":
-                devices = devices.filter(department=self.departmentfilter)
-                self.departmentfilter = self.departmentfilter.id
-            if hasattr(self.request.user, 'departments'):
-                devices = devices.exclude(~Q(department__in=self.request.user.departments.all()), is_private=True)
-            self.viewsorting = self.kwargs.get("sorting", "name")
-            if self.viewsorting in [s[0] for s in VIEWSORTING_DEVICES]:
-                devices = devices.order_by(self.viewsorting)
-
-            return devices.values("id", "name", "inventorynumber", "devicetype__name", "room__name",
-                                  "room__building__name",
-                                  "group__name", "currentlending__owner__username", "currentlending__duedate")
+        devices = get_devices(self.request.user, self.viewfilter, self.departmentfilter, self.viewsorting)
+        return devices.select_related('devicetype', 'room__building', 'group', 'currentlending__owner')
 
     def get_context_data(self, **kwargs):
         '''method for getting context data (filter, time, templates, breadcrumbs)'''
@@ -139,9 +153,9 @@ class DeviceList(PermissionRequiredMixin, PaginationMixin, ListView):
 
         # getting filters
         context["viewform"] = DeviceViewForm(initial={
-            'viewfilter': self.viewfilter,
-            "viewsorting": self.viewsorting,
-            "departmentfilter": self.departmentfilter
+            'category': self.viewfilter,
+            "sorting": self.viewsorting,
+            "department": self.departmentfilter
         })
 
         context["today"] = datetime.datetime.today()
@@ -156,66 +170,34 @@ class DeviceList(PermissionRequiredMixin, PaginationMixin, ListView):
 
 
 class ExportCsv(PermissionRequiredMixin, View):
-    permission_required = 'devices.read_device'
+    permission_required = 'devices.view_device'
+    keys = ["id", "name", "inventorynumber", "devicetype__name", "room__name", "group__name"]
+    headers = [_("ID"), _("Device"), _("Inventorynumber"), _("Devicetype"), _("Room"), _("Devicegroup")]
 
     def post(self, request):
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="' + str(int(time.time())) + '_searchresult.csv"'
 
-        if "format" in request.POST:
-            if request.POST["format"] == "csv":
-                response = HttpResponse(content_type='text/csv')
-                response['Content-Disposition'] = 'attachment; filename="' + str(int(time.time())) + '_searchresult.csv"'
-                devices = None
-                searchvalues = ["id", "name", "inventorynumber", "devicetype__name", "room__name", "group__name"]
+        devices = get_devices(request.user, request.POST['category'], request.POST['department'], request.POST['sorting'])
 
-                if request.POST['viewfilter'] == "active":
-                    devices = Device.active()
-                elif request.POST['viewfilter'] == "all":
-                    devices = Device.objects.all()
-                elif request.POST['viewfilter'] == "available":
-                    devices = Device.active().filter(currentlending=None)
-                elif request.POST['viewfilter'] == "lent":
-                    devices = Lending.objects.filter(returndate=None)
-                elif request.POST['viewfilter'] == "archived":
-                    devices = Device.objects.exclude(archived=None)
-                elif request.POST['viewfilter'] == "trashed":
-                    devices = Device.objects.exclude(trashed=None)
-                elif request.POST['viewfilter'] == "overdue":
-                    devices = Lending.objects.filter(returndate=None, duedate__lt=datetime.date.today())
-                elif request.POST['viewfilter'] == "returnsoon":
-                    soon = datetime.date.today() + datetime.timedelta(days=10)
-                    devices = Lending.objects.filter(returndate=None, duedate__lte=soon,
-                                                          duedate__gt=datetime.date.today())
-                elif request.POST['viewfilter'] == "temporary":
-                    devices = Device.active().filter(templending=True)
-                elif request.POST['viewfilter'] == "bookmark":
-                    if self.request.user.is_authenticated:
-                        devices = self.request.user.bookmarks.all()
-
-                if request.POST["departmentfilter"] == "my":
-                    devices = devices.filter(department__in=request.user.departments.all())  # does this work?
-                elif request.POST["departmentfilter"].isdigit():
-                    devices = devices.filter(department__in=Department.objects.filter(id=int(request.POST["departmentfilter"])))
-                elif request.POST["departmentfilter"] == "all":
-                    pass
-
-                writer = csv.writer(response, delimiter=",", quotechar='"', quoting=csv.QUOTE_ALL)
-                headers = [_("ID"), _("Device"), _("Inventorynumber"),
-                                    _("Devicetype"), _("Room"), _("Devicegroup")]
-                writer.writerow(headers)
-                for device in devices.values_list(*searchvalues):
-                    writer.writerow(device)
-                return response
+        writer = csv.writer(response, delimiter=",", quotechar='"', quoting=csv.QUOTE_ALL)
+        writer.writerow(self.headers)
+        for device in devices.values_list(*self.keys):
+            writer.writerow(device)
+        return response
 
 
 class DeviceDetail(PermissionRequiredMixin, DetailView):
     # get related data to chosen device
     queryset = Device.objects \
-        .select_related("manufacturer", "devicetype", "currentlending", "currentlending__owner", "department",
-                        "room", "room__building") \
-        .prefetch_related("pictures", )
+        .select_related(
+            "manufacturer", "devicetype", "currentlending",
+            "currentlending__owner", "department", "room", "room__building",
+        )\
+        .prefetch_related("pictures")
     context_object_name = 'device'
     object = None
-    permission_required = 'devices.read_device'
+    permission_required = 'devices.view_device'
 
     def get_object(self, queryset=None):
         if self.object is not None:
@@ -246,16 +228,22 @@ class DeviceDetail(PermissionRequiredMixin, DetailView):
         context['tagform'].fields["tags"].queryset = Devicetag.objects.exclude(devices=context["device"])
 
         # lending history, eidt history, mail history
-        context["lending_list"] = Lending.objects.filter(device=context["device"])\
-                                      .select_related("owner").order_by("-pk")[:10]
-        context["version_list"] = Version.objects.filter(object_id=context["device"].id,
-                                                         content_type_id=ContentType.objects.get(
-                                                             model='device').id) \
-                                      .select_related("revision", "revision__user").order_by("-pk")[:10]
-        context["mail_list"] = MailHistory.objects.filter(device=context["device"])\
-                                   .select_related("sent_by").order_by("-pk")[:10]
+        context["lending_list"] = Lending.objects\
+            .filter(device=context["device"])\
+            .select_related("owner")\
+            .order_by("-pk")[:10]
+        context["version_list"] = Version.objects\
+            .filter(object_id=context["device"].id,
+                    content_type_id=ContentType.objects.get(model='device').id) \
+            .select_related("revision", "revision__user")\
+            .order_by("-pk")[:10]
+        context['content_type'] = ContentType.objects.get(model='device').id
+        context["mail_list"] = MailHistory.objects\
+            .filter(device=context["device"])\
+            .select_related("sent_by")\
+            .order_by("-pk")[:10]
 
-        context["today"] = datetime.datetime.utcnow().replace(tzinfo=utc)
+        context["today"] = datetime.date.today()
         context["weekago"] = context["today"] - datetime.timedelta(days=7)
         context["attributevalue_list"] = TypeAttributeValue.objects.filter(device=context["device"])
         context["lendform"] = LendForm()
@@ -341,30 +329,32 @@ class DeviceIpAddress(PermissionRequiredMixin, FormView):
     success_url = "/devices"
     permission_required = 'devices.change_device'
 
+    def dispatch(self, request, **kwargs):
+        self.object = get_object_or_404(Device, pk=self.kwargs['pk'])
+        return super().dispatch(request, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        device = context["form"].cleaned_data["device"]
         context["breadcrumbs"] = [
             (reverse("device-list"), _("Devices")),
-            (reverse("device-detail", kwargs={"pk": device.pk}), device.name),
+            (reverse("device-detail", kwargs={"pk": self.object.pk}), self.object.name),
             ("", _("Assign IP-Addresses"))]
 
         return context
 
     def form_valid(self, form):
         ipaddresses = form.cleaned_data["ipaddresses"]
-        device = form.cleaned_data["device"]
 
-        if device.archived is not None:
+        if self.object.archived is not None:
             messages.error(self.request, _("Archived Devices can't get new IP-Addresses"))
-            return HttpResponseRedirect(reverse("device-detail", kwargs={"pk": device.pk}))
+            return HttpResponseRedirect(reverse("device-detail", kwargs={"pk": self.object.pk}))
 
-        reversion.set_comment(_("Assigned to Device {0}".format(device.name)))
+        reversion.set_comment(_("Assigned to Device {0}").format(self.object.name))
         for ipaddress in ipaddresses:
-            ipaddress.device = device
+            ipaddress.device = self.object
             ipaddress.save()
 
-        return HttpResponseRedirect(reverse("device-detail", kwargs={"pk": device.pk}))
+        return HttpResponseRedirect(reverse("device-detail", kwargs={"pk": self.object.pk}))
 
 
 class DeviceIpAddressPurpose(PermissionRequiredMixin, FormView):
@@ -399,7 +389,7 @@ class DeviceIpAddressPurpose(PermissionRequiredMixin, FormView):
 class DeviceLendingList(PermissionRequiredMixin, PaginationMixin, ListView):
     context_object_name = 'lending_list'
     template_name = 'devices/device_lending_list.html'
-    permission_required = 'devices.read_device'
+    permission_required = 'devices.view_device'
 
     def get_queryset(self):
         deviceid = self.kwargs["pk"]
@@ -967,7 +957,7 @@ class DeviceStorage(PermissionRequiredMixin, SingleObjectMixin, FormView):
 
 class DeviceBookmark(PermissionRequiredMixin, SingleObjectTemplateResponseMixin, BaseDetailView):
     model = Device
-    permission_required = 'devices.read_device'
+    permission_required = 'devices.view_device'
 
     def get_permission_object(self):
         return self.get_object()
@@ -988,7 +978,7 @@ class DeviceBookmark(PermissionRequiredMixin, SingleObjectTemplateResponseMixin,
 class TemplateList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Template
     context_object_name = 'template_list'
-    permission_required = 'devices.read_template'
+    permission_required = 'devices.view_template'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1049,14 +1039,14 @@ class TemplateDelete(PermissionRequiredMixin, DeleteView):
 class RoomList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Room
     context_object_name = 'room_list'
-    permission_required = 'devices.read_room'
+    permission_required = 'devices.view_room'
 
     def get_queryset(self):
         rooms = Room.objects.select_related("building").all()
-        self.filterstring = self.kwargs.pop("filter", None)
+        self.filterstring = self.request.GET.get("filter", None)
         if self.filterstring:
             rooms = rooms.filter(name__icontains=self.filterstring)
-        self.viewsorting = self.kwargs.pop("sorting", "name")
+        self.viewsorting = self.request.GET.get("sorting", "name")
         if self.viewsorting in [s[0] for s in VIEWSORTING]:
             rooms = rooms.order_by(self.viewsorting)
         return rooms
@@ -1067,7 +1057,7 @@ class RoomList(PermissionRequiredMixin, PaginationMixin, ListView):
         context["breadcrumbs"] = [(reverse("room-list"), _("Rooms"))]
         context["viewform"] = ViewForm(initial={"viewsorting": self.viewsorting})
         if self.filterstring:
-            context["filterform"] = FilterForm(initial={"filterstring": self.filterstring})
+            context["filterform"] = FilterForm(initial={"filter": self.filterstring})
         else:
             context["filterform"] = FilterForm()
         if context["is_paginated"] and context["page_obj"].number > 1:
@@ -1078,7 +1068,7 @@ class RoomList(PermissionRequiredMixin, PaginationMixin, ListView):
 class RoomDetail(PermissionRequiredMixin, DetailView):
     model = Room
     context_object_name = 'room'
-    permission_required = 'devices.read_room'
+    permission_required = 'devices.view_room'
 
     def get_context_data(self, **kwargs):
         # Call the base implementation first to get a context
@@ -1189,14 +1179,14 @@ class RoomMerge(PermissionRequiredMixin, View):
 class BuildingList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Building
     context_object_name = 'building_list'
-    permission_required = 'devices.read_building'
+    permission_required = 'devices.view_building'
 
     def get_queryset(self):
         buildings = Building.objects.all()
-        self.filterstring = self.kwargs.pop("filter", None)
+        self.filterstring = self.request.GET.get("filter", None)
         if self.filterstring:
             buildings = buildings.filter(name__icontains=self.filterstring)
-        self.viewsorting = self.kwargs.pop("sorting", "name")
+        self.viewsorting = self.request.GET.get("sorting", "name")
         if self.viewsorting in [s[0] for s in VIEWSORTING]:
             buildings = buildings.order_by(self.viewsorting)
         return buildings
@@ -1207,7 +1197,7 @@ class BuildingList(PermissionRequiredMixin, PaginationMixin, ListView):
         context["breadcrumbs"] = [(reverse("building-list"), _("Buildings"))]
         context["viewform"] = ViewForm(initial={"viewsorting": self.viewsorting})
         if self.filterstring:
-            context["filterform"] = FilterForm(initial={"filterstring": self.filterstring})
+            context["filterform"] = FilterForm(initial={"filter": self.filterstring})
         else:
             context["filterform"] = FilterForm()
         return context
@@ -1216,7 +1206,7 @@ class BuildingList(PermissionRequiredMixin, PaginationMixin, ListView):
 class BuildingDetail(PermissionRequiredMixin, DetailView):
     model = Building
     context_object_name = 'building'
-    permission_required = 'devices.read_building'
+    permission_required = 'devices.view_building'
 
     def get_context_data(self, **kwargs):
         # Call the base implementation first to get a context
@@ -1326,14 +1316,14 @@ class BuildingMerge(PermissionRequiredMixin, View):
 class ManufacturerList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Manufacturer
     context_object_name = 'manufacturer_list'
-    permission_required = 'devices.read_manufacturer'
+    permission_required = 'devices.view_manufacturer'
 
     def get_queryset(self):
         manufacturers = Manufacturer.objects.all()
-        self.filterstring = self.kwargs.pop("filter", None)
+        self.filterstring = self.request.GET.get("filter", None)
         if self.filterstring:
             manufacturers = manufacturers.filter(name__icontains=self.filterstring)
-        self.viewsorting = self.kwargs.pop("sorting", "name")
+        self.viewsorting = self.request.GET.get("sorting", "name")
         if self.viewsorting in [s[0] for s in VIEWSORTING]:
             manufacturers = manufacturers.order_by(self.viewsorting)
         return manufacturers
@@ -1344,7 +1334,7 @@ class ManufacturerList(PermissionRequiredMixin, PaginationMixin, ListView):
         context["breadcrumbs"] = [(reverse("manufacturer-list"), _("Manufacturers"))]
         context["viewform"] = ViewForm(initial={"viewsorting": self.viewsorting})
         if self.filterstring:
-            context["filterform"] = FilterForm(initial={"filterstring": self.filterstring})
+            context["filterform"] = FilterForm(initial={"filter": self.filterstring})
         else:
             context["filterform"] = FilterForm()
         if context["is_paginated"] and context["page_obj"].number > 1:
@@ -1356,7 +1346,7 @@ class ManufacturerDetail(PermissionRequiredMixin, DetailView):
     model = Manufacturer
     context_object_name = 'object'
     template_name = "devices/manufacturer_detail.html"
-    permission_required = 'devices.read_manufacturer'
+    permission_required = 'devices.view_manufacturer'
 
     def get_context_data(self, **kwargs):
         # Call the base implementation first to get a context
@@ -1581,7 +1571,7 @@ class PictureDelete(DeleteView):
 class Search(PermissionRequiredMixin, ListView):
     model = Device
     template_name = 'devices/search.html'
-    permission_required = "devices.read_device"
+    permission_required = "devices.view_device"
 
     STRING_FIELDS = {
         'name': 'name',
@@ -1694,10 +1684,7 @@ class Search(PermissionRequiredMixin, ListView):
         context["breadcrumbs"] = [("", _("Search"))]
         context["searchstring"] = self.get_searchstring()
         context["keys"] = sorted(list(self.STRING_FIELDS.keys())
-                                + list(self.DATE_FIELDS.keys()))
-        # add page number to breadcrumbs
-        if context["is_paginated"] and context["page_obj"].number > 1:
-            context["breadcrumbs"].append(["", context["page_obj"].number])
+                                 + list(self.DATE_FIELDS.keys()))
         return context
 
 
@@ -1713,18 +1700,18 @@ class PublicDeviceListView(ListView):
             raise ImproperlyConfigured
 
         devices = Device.objects.filter(**query_dict)
-        self.filterstring = self.kwargs.pop("filter", None)
+        self.filterstring = self.request.GET.get("filter", None)
         if self.filterstring:
             devices = devices.filter(name__icontains=self.filterstring)
-        self.viewsorting = self.kwargs.pop("sorting", "name")
+        self.viewsorting = self.request.GET.get("sorting", "name")
         if self.viewsorting in [s[0] for s in VIEWSORTING]:
             devices = devices.order_by(self.viewsorting)
-        self.groupfilter = self.kwargs.pop("group", "all")
+        self.groupfilter = self.request.GET.get("group", "all")
         if self.groupfilter != "all":
             devices = devices.filter(group__id=self.groupfilter)
         return devices.values("id", "name", "inventorynumber", "devicetype__name", "room__name",
-                                  "room__building__name",
-                                  "group__name", "currentlending__owner__username", "currentlending__duedate")
+                              "room__building__name",
+                              "group__name", "currentlending__owner__username", "currentlending__duedate")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1734,7 +1721,7 @@ class PublicDeviceListView(ListView):
             context["filterform"] = FilterForm(initial={"filterstring": self.filterstring})
         else:
             context["filterform"] = FilterForm()
-        context["groupfilterform"] = DeviceGroupFilterForm(initial={"groupfilter": self.groupfilter})
+        context["groupfilterform"] = DeviceGroupFilterForm(initial={"group": self.groupfilter})
         if context["is_paginated"] and context["page_obj"].number > 1:
             context["breadcrumbs"].append(["", context["page_obj"].number])
         context["nochrome"] = self.request.GET.get("nochrome", False)

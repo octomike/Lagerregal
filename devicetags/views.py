@@ -1,14 +1,22 @@
-from django.views.generic import ListView, CreateView, UpdateView, DeleteView, FormView
-from django.urls import reverse_lazy, reverse
-from django.utils.translation import ugettext_lazy as _
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.shortcuts import render
+from django.urls import reverse
+from django.urls import reverse_lazy
+from django.utils.translation import ugettext_lazy as _
+from django.views.generic import CreateView
+from django.views.generic import DeleteView
+from django.views.generic import FormView
+from django.views.generic import ListView
+from django.views.generic import UpdateView
 
-from devicetags.models import Devicetag
+from devices.forms import VIEWSORTING
+from devices.forms import FilterForm
+from devices.forms import ViewForm
 from devices.models import Device
-from devices.forms import ViewForm, VIEWSORTING, FilterForm
-from devicetags.forms import TagForm, DeviceTagForm
+from devicetags.forms import DeviceTagForm
+from devicetags.forms import TagForm
+from devicetags.models import Devicetag
 from Lagerregal.utils import PaginationMixin
 from users.mixins import PermissionRequiredMixin
 
@@ -16,18 +24,18 @@ from users.mixins import PermissionRequiredMixin
 class DevicetagList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Devicetag
     context_object_name = 'devicetag_list'
-    permission_required = 'devicetags.read_devicetag'
+    permission_required = 'devicetags.view_devicetag'
 
     def get_queryset(self):
         devicetags = Devicetag.objects.all()
 
         # filtering devicetags
-        self.filterstring = self.kwargs.pop("filter", None)
+        self.filterstring = self.request.GET.get("filter", None)
         if self.filterstring:
             devicetags = devicetags.filter(name__icontains=self.filterstring)
 
         # sort view of devicetags by name or ID
-        self.viewsorting = self.kwargs.pop("sorting", "name")
+        self.viewsorting = self.request.GET.get("sorting", "name")
         if self.viewsorting in [s[0] for s in VIEWSORTING]:
             devicetags = devicetags.order_by(self.viewsorting)
 
@@ -38,11 +46,11 @@ class DevicetagList(PermissionRequiredMixin, PaginationMixin, ListView):
         context = super().get_context_data(**kwargs)
         context["breadcrumbs"] = [
             (reverse("devicetag-list"), _("Devicetags"))]
-        context["viewform"] = ViewForm(initial={"viewsorting": self.viewsorting})
+        context["viewform"] = ViewForm(initial={"sorting": self.viewsorting})
 
         # filtering
         if self.filterstring:
-            context["filterform"] = FilterForm(initial={"filterstring": self.filterstring})
+            context["filterform"] = FilterForm(initial={"filter": self.filterstring})
         else:
             context["filterform"] = FilterForm()
 
@@ -115,24 +123,26 @@ class DeviceTags(FormView):
     form_class = DeviceTagForm
     success_url = "/devices"
 
+    def dispatch(self, request, **kwargs):
+        self.object = get_object_or_404(Device, pk=self.kwargs['pk'])
+        return super().dispatch(request, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        device = context["form"].cleaned_data["device"]
 
         # adds "Devices" to breadcrumbs
         context["breadcrumbs"] = [
             (reverse("device-list"), _("Devices")),
-            (reverse("device-detail", kwargs={"pk": device.pk}), device.name),
+            (reverse("device-detail", kwargs={"pk": self.object.pk}), self.object.name),
             ("", _("Assign Tags"))]
 
         return context
 
     def form_valid(self, form):
         tags = form.cleaned_data["tags"]
-        device = form.cleaned_data["device"]
-        device.tags.add(*tags)
+        self.object.tags.add(*tags)
 
-        return HttpResponseRedirect(reverse("device-detail", kwargs={"pk": device.pk}))
+        return HttpResponseRedirect(reverse("device-detail", kwargs={"pk": self.object.pk}))
 
 
 class DeviceTagRemove(PermissionRequiredMixin, DeleteView):

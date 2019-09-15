@@ -1,11 +1,12 @@
 from django.db import models
-from django.utils.translation import ugettext_lazy as _
 from django.urls import reverse
+from django.utils.translation import ugettext_lazy as _
 
 from reversion import revisions as reversion
 
 from devices.models import Device
-from users.models import Department, Lageruser
+from users.models import Department
+from users.models import Lageruser
 
 
 @reversion.register(exclude=["last_seen"])
@@ -24,9 +25,6 @@ class IpAddress(models.Model):
     class Meta:
         verbose_name = _('IP-Address')
         verbose_name_plural = _('IP-Addresses')
-        permissions = (
-            ("read_ipaddress", _("Can read IP-Address")),
-        )
         ordering = ['address']
 
     def get_absolute_url(self):

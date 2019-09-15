@@ -1,10 +1,12 @@
 import os
 import re
+import urllib
 
+from django.forms import CheckboxInput
 from django.template import Library
 from django.urls import reverse
-from django.utils.html import mark_safe, format_html
-from django.forms import CheckboxInput
+from django.utils.html import format_html
+from django.utils.html import mark_safe
 
 from devices.models import Bookmark
 
@@ -122,3 +124,16 @@ def deletebutton(viewname, *args):
     return {
         'url': reverse(viewname, args=args)
     }
+
+
+@register.simple_tag(takes_context=True)
+def current_url(context, **kwargs):
+    path = context['request'].get_full_path()
+    if '?' in path:
+        path, qs = path.split('?', 1)
+        query = urllib.parse.parse_qs(qs)
+    else:
+        query = {}
+    query.update(kwargs)
+    qs = urllib.parse.urlencode(query, doseq=True)
+    return path + '?' + qs

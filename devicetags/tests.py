@@ -1,7 +1,5 @@
-import unittest
-
-from django.test.client import Client
 from django.test import TestCase
+from django.test.client import Client
 from django.urls import reverse
 
 from model_mommy import mommy
@@ -29,20 +27,19 @@ class DevicetagsTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_create_view(self):
-        response = self.client.get('/devicetags/add')
+        response = self.client.get('/devicetags/add/')
         self.assertEqual(response.status_code, 200)
 
     def test_update_view(self):
         tag = mommy.make(Devicetag)
-        response = self.client.get('/devicetags/edit/%i' % tag.pk)
+        response = self.client.get('/devicetags/%i/edit/' % tag.pk)
         self.assertEqual(response.status_code, 200)
 
     def test_delete_view(self):
         tag = mommy.make(Devicetag)
-        response = self.client.get('/devicetags/delete/%i' % tag.pk)
+        response = self.client.get('/devicetags/%i/delete/' % tag.pk)
         self.assertEqual(response.status_code, 200)
 
-    @unittest.skip('failing')
     def test_devicetags_view(self):
         device = mommy.make(Device)
         tag = mommy.make(Devicetag)
@@ -54,5 +51,5 @@ class DevicetagsTests(TestCase):
         device = mommy.make(Device)
         tag = mommy.make(Devicetag)
         device.tags.add(tag)
-        response = self.client.get('/devices/%i/tags/%i' % (device.pk, tag.pk))
+        response = self.client.get('/devices/%i/tags/%i/' % (device.pk, tag.pk))
         self.assertEqual(response.status_code, 200)

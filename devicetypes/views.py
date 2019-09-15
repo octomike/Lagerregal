@@ -1,16 +1,26 @@
-from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView, View
-from django.shortcuts import render
-from django.shortcuts import get_object_or_404
-from django.http import HttpResponseRedirect
-from django.utils.translation import ugettext_lazy as _
-from django.urls import reverse_lazy, reverse
-from reversion import revisions as reversion
 from django.conf import settings
+from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+from django.shortcuts import render
+from django.urls import reverse
+from django.urls import reverse_lazy
+from django.utils.translation import ugettext_lazy as _
+from django.views.generic import CreateView
+from django.views.generic import DeleteView
+from django.views.generic import DetailView
+from django.views.generic import ListView
+from django.views.generic import UpdateView
+from django.views.generic import View
 
+from reversion import revisions as reversion
+
+from devices.forms import VIEWSORTING
+from devices.forms import FilterForm
+from devices.forms import ViewForm
 from devices.models import Device
-from devicetypes.models import Type, TypeAttribute
 from devicetypes.forms import TypeForm
-from devices.forms import ViewForm, VIEWSORTING, FilterForm
+from devicetypes.models import Type
+from devicetypes.models import TypeAttribute
 from Lagerregal.utils import PaginationMixin
 from users.mixins import PermissionRequiredMixin
 
@@ -18,19 +28,19 @@ from users.mixins import PermissionRequiredMixin
 class TypeList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Type
     context_object_name = 'type_list'
-    permission_required = 'devicetypes.read_type'
+    permission_required = 'devicetypes.view_type'
 
     def get_queryset(self):
-        '''mehtod for query all devicetypes and present the results depending on existing filter'''
+        '''method for query all devicetypes and present the results depending on existing filter'''
         devicetype = Type.objects.all()
 
         # filtering with existing filterstring
-        self.filterstring = self.kwargs.pop("filter", None)
+        self.filterstring = self.request.GET.get("filter", None)
         if self.filterstring:
             devicetype = devicetype.filter(name__icontains=self.filterstring)
 
         # sort list of results (name or ID ascending or descending)
-        self.viewsorting = self.kwargs.pop("sorting", "name")
+        self.viewsorting = self.request.GET.get("sorting", "name")
         if self.viewsorting in [s[0] for s in VIEWSORTING]:
             devicetype = devicetype.order_by(self.viewsorting)
 
@@ -42,11 +52,11 @@ class TypeList(PermissionRequiredMixin, PaginationMixin, ListView):
         context = super().get_context_data(**kwargs)
         context["breadcrumbs"] = [
             (reverse("type-list"), _("Devicetypes")), ]
-        context["viewform"] = ViewForm(initial={"viewsorting": self.viewsorting})
+        context["viewform"] = ViewForm(initial={"sorting": self.viewsorting})
 
         # filtering
         if self.filterstring:
-            context["filterform"] = FilterForm(initial={"filterstring": self.filterstring})
+            context["filterform"] = FilterForm(initial={"filter": self.filterstring})
         else:
             context["filterform"] = FilterForm()
 
@@ -61,7 +71,7 @@ class TypeDetail(PermissionRequiredMixin, DetailView):
     model = Type
     context_object_name = 'object'
     template_name = "devicetypes/type_detail.html"
-    permission_required = 'devicetypes.read_type'
+    permission_required = 'devicetypes.view_type'
 
     def get_context_data(self, **kwargs):
         # Call the base implementation first to get a context

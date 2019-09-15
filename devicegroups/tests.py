@@ -1,5 +1,5 @@
-from django.test.client import Client
 from django.test import TestCase
+from django.test.client import Client
 from django.urls import reverse
 
 from model_mommy import mommy
@@ -25,20 +25,20 @@ class DevicegroupTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_create_view(self):
-        response = self.client.get('/devicegroups/add')
+        response = self.client.get('/devicegroups/add/')
         self.assertEqual(response.status_code, 200)
 
     def test_detail_view(self):
         devicegroup = mommy.make(Devicegroup)
-        response = self.client.get('/devicegroups/view/%i' % devicegroup.pk)
+        response = self.client.get('/devicegroups/%i/' % devicegroup.pk)
         self.assertEqual(response.status_code, 200)
 
     def test_update_view(self):
         devicegroup = mommy.make(Devicegroup)
-        response = self.client.get('/devicegroups/edit/%i' % devicegroup.pk)
+        response = self.client.get('/devicegroups/%i/edit/' % devicegroup.pk)
         self.assertEqual(response.status_code, 200)
 
     def test_delete_view(self):
         devicegroup = mommy.make(Devicegroup)
-        response = self.client.get('/devicegroups/delete/%i' % devicegroup.pk)
+        response = self.client.get('/devicegroups/%i/delete/' % devicegroup.pk)
         self.assertEqual(response.status_code, 200)

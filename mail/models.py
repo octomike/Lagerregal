@@ -1,9 +1,9 @@
-from django.db import models
-from django.utils.translation import ugettext_lazy as _
-from django.urls import reverse
-from django.core.mail import EmailMessage
-from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+from django.core.mail import EmailMessage
+from django.db import models
+from django.urls import reverse
+from django.utils.translation import ugettext_lazy as _
 
 import pystache
 
@@ -34,9 +34,6 @@ class MailTemplate(models.Model):
         ordering = ['name']
         verbose_name = _('Mailtemplate')
         verbose_name_plural = _('Mailtemplates')
-        permissions = (
-            ("read_mailtemplate", _("Can read Mailtemplate")),
-        )
 
     def get_absolute_url(self):
         return reverse('mail-detail', kwargs={'pk': self.pk})
@@ -61,8 +58,10 @@ class MailTemplate(models.Model):
             "inventorynumber": data["device"].inventorynumber,
             "manufacturer": data["device"].manufacturer,
             "name": str(data["device"]),
-            "room": (data["device"].room.name + " (" + data["device"].room.building.name + ")" if data[
-                                                                                                      "device"].room is not None else ""),
+            "room": '' if data["device"].room is None else '{} ({})'.format(
+                data["device"].room.name,
+                data["device"].room.building.name,
+            ),
             "serialnumber": data["device"].serialnumber,
             "templending": data["device"].templending,
             "trashed": data["device"].trashed,
@@ -111,7 +110,7 @@ class MailTemplateRecipient(models.Model):
     content_object = GenericForeignKey('content_type', 'object_id')
 
     def __str__(self):
-        return str(self.content_type.name + ": " + str(self.content_object))
+        return str(self.content_type.name) + ": " + str(self.content_object)
 
 
 class MailHistory(models.Model):
@@ -121,6 +120,3 @@ class MailHistory(models.Model):
     sent_by = models.ForeignKey(Lageruser, null=True, on_delete=models.SET_NULL)
     sent_at = models.DateTimeField(auto_now_add=True)
     device = models.ForeignKey("devices.Device", null=True, on_delete=models.CASCADE)
-
-    def get_absolute_url(self):
-        return reverse('mailhistory-detail', kwargs={'pk': self.pk})

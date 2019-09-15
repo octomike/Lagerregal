@@ -1,43 +1,57 @@
-from django.views.generic import DetailView, TemplateView, ListView, CreateView, UpdateView, DeleteView, FormView
-from django.http import HttpResponseRedirect
-from django.urls import reverse
-from django.utils.translation import ugettext_lazy as _
 from django.contrib import messages
-from django.contrib.contenttypes.models import ContentType
-from django.shortcuts import render
 from django.contrib.auth.models import Permission
-from django.urls import reverse_lazy
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import get_object_or_404
 from django.db.models import Q
+from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+from django.shortcuts import render
+from django.urls import reverse
+from django.urls import reverse_lazy
+from django.utils.translation import ugettext_lazy as _
+from django.views.generic import CreateView
+from django.views.generic import DeleteView
+from django.views.generic import DetailView
+from django.views.generic import FormView
+from django.views.generic import ListView
+from django.views.generic import TemplateView
+from django.views.generic import UpdateView
+
 from reversion.models import Version
 
-from users.mixins import PermissionRequiredMixin
-from users.models import Lageruser, Department, DepartmentUser
+from devices.forms import VIEWSORTING
+from devices.forms import DepartmentFilterForm
+from devices.forms import FilterForm
+from devices.forms import ViewForm
 from devices.models import Lending
-from users.forms import SettingsForm, AvatarForm, DepartmentAddUserForm
 from Lagerregal import settings
 from Lagerregal.utils import PaginationMixin
-from network.models import IpAddress
 from network.forms import UserIpAddressForm
-from devices.forms import ViewForm, VIEWSORTING, DepartmentFilterForm, FilterForm
+from network.models import IpAddress
+from users.forms import AvatarForm
+from users.forms import DepartmentAddUserForm
+from users.forms import SettingsForm
+from users.mixins import PermissionRequiredMixin
+from users.models import Department
+from users.models import DepartmentUser
+from users.models import Lageruser
 
 
 class UserList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Lageruser
     context_object_name = 'user_list'
     template_name = "users/user_list.html"
-    permission_required = "users.read_user"
+    permission_required = "users.view_lageruser"
 
     def get_queryset(self):
         users = Lageruser.objects.all()
-        self.filterstring = self.kwargs.pop("filter", "")
+        self.filterstring = self.request.GET.get("filter", "")
 
         # filtering by department
         if self.request.user.departments.count() > 0:
-            self.departmentfilter = self.kwargs.get("department", "my")
+            self.departmentfilter = self.request.GET.get("department", "my")
         else:
-            self.departmentfilter = self.kwargs.get("department", "all")
+            self.departmentfilter = self.request.GET.get("department", "all")
 
         if self.departmentfilter != "all" and self.departmentfilter != "my":
             users = users.filter(departments__id=self.departmentfilter).distinct()
@@ -57,7 +71,7 @@ class UserList(PermissionRequiredMixin, PaginationMixin, ListView):
         # adds "Users" to breadcrumbs
         context["breadcrumbs"] = [
             (reverse("user-list"), _("Users")), ]
-        context["filterform"] = DepartmentFilterForm(initial={"filterstring": self.filterstring, "departmentfilter": self.departmentfilter})
+        context["filterform"] = DepartmentFilterForm(initial={"filter": self.filterstring, "department": self.departmentfilter})
 
         # add page number to breadcrumbs if there are multiple pages
         if context["is_paginated"] and context["page_obj"].number > 1:
@@ -66,77 +80,51 @@ class UserList(PermissionRequiredMixin, PaginationMixin, ListView):
         return context
 
 
-class ProfileView(PermissionRequiredMixin, DetailView):
+class ProfileBaseView(DetailView):
     model = Lageruser
     context_object_name = 'profileuser'
-    permission_required = "users.read_user"
-
     template_name = 'users/profile.html'
 
     def get_context_data(self, **kwargs):
-        # Call the base implementation first to get a context
         context = super().get_context_data(**kwargs)
-        # Add in a QuerySet of all the books
+
         # shows list of edits made by user
-        context['edits'] = Version.objects.select_related("revision", "revision__user"
-        ).filter(content_type_id=ContentType.objects.get(model='device').id,
-                 revision__user=context["profileuser"]).order_by("-pk")
+        context['edits'] = Version.objects\
+            .select_related("revision", "revision__user")\
+            .filter(
+                content_type_id=ContentType.objects.get(model='device').id,
+                revision__user=context["profileuser"])\
+            .order_by("-pk")
 
         # shows list of user lendings
         context['lendings'] = Lending.objects.select_related("device", "device__room", "device__room__building",
                                                              "owner").filter(owner=context["profileuser"],
                                                                              returndate=None)
-        context['lendhistory'] = Lending.objects.filter(owner=context["profileuser"]).order_by('-lenddate').exclude(returndate=None)
+        context['lendhistory'] = Lending.objects.filter(owner=self.object).order_by('-lenddate').exclude(returndate=None)
+
         # shows list of user related ip-adresses
-        context['ipaddresses'] = IpAddress.objects.filter(user=context["profileuser"])
+        context['ipaddresses'] = self.object.ipaddress_set.all()
         context['ipaddressform'] = UserIpAddressForm()
         context["ipaddressform"].fields["ipaddresses"].queryset = IpAddress.objects.filter(device=None,
             user=None).filter(Q(department__in=self.object.departments.all()) | Q(department=None))
         # shows list of users permission (group permission, user permission)
         context["permission_list"] = Permission.objects.all().values("name", "codename", "content_type__app_label")
-        context["userperms"] = [x[0] for x in context["profileuser"].user_permissions.values_list("codename")]
-        context["groupperms"] = [x.split(".")[1] for x in context["profileuser"].get_group_permissions()]
-
-        # adds username to breadcrumbs
-        context["breadcrumbs"] = [(reverse("user-list"), _("Users")), ("", context["profileuser"])]
-
-        return context
-
-
-class UserprofileView(TemplateView):
-    template_name = "users/profile.html"
-
-    def get_context_data(self, **kwargs):
-        # Call the base implementation first to get a context
-        context = super().get_context_data(**kwargs)
-        # Add in a QuerySet of all the books
-        context["profileuser"] = self.request.user
-
-        # shows list of edits made by user
-        context['edits'] = Version.objects.select_related("revision", "revision__user"
-        ).filter(content_type_id=ContentType.objects.get(model='device').id,
-                 revision__user=context["profileuser"]).order_by("-pk")
-
-        # shows list users lendings
-        context['lendings'] = Lending.objects.select_related("device", "device__room", "device__room__building",
-                                                             "owner").filter(owner=context["profileuser"],
-                                                                             returndate=None)
-
-        # shows user related ip-adresses
-        context['ipaddresses'] = IpAddress.objects.filter(user=context["profileuser"])
-        context['ipaddressform'] = UserIpAddressForm()
-
-        # shows list of users permissions (group permissions, user permissions)
-        context["permission_list"] = Permission.objects.all().values("name", "codename", "content_type__app_label")
-        context["userperms"] = [x[0] for x in context["profileuser"].user_permissions.values_list("codename")]
-        context["groupperms"] = [x.split(".")[1] for x in context["profileuser"].get_group_permissions()]
+        context["userperms"] = [x[0] for x in self.object.user_permissions.values_list("codename")]
+        context["groupperms"] = [x.split(".")[1] for x in self.object.get_group_permissions()]
 
         # adds user name to breadcrumbs
-        context["breadcrumbs"] = [
-            (reverse("user-list"), _("Users")),
-            (reverse("userprofile", kwargs={"pk": self.request.user.pk}), self.request.user), ]
+        context["breadcrumbs"] = [(reverse("user-list"), _("Users")), ("", self.object)]
 
         return context
+
+
+class ProfileView(PermissionRequiredMixin, ProfileBaseView):
+    permission_required = "users.view_lageruser"
+
+
+class UserprofileView(ProfileBaseView):
+    def get_object(self):
+        return self.request.user
 
 
 class UsersettingsView(TemplateView):
@@ -208,11 +196,6 @@ class UsersettingsView(TemplateView):
 
         # handle given avatar
         elif "avatar" in request.FILES or "avatar" in request.POST:
-            if request.user.avatar:
-                tempavatar = request.user.avatar
-            else:
-                tempavatar = None
-
             form = AvatarForm(request.POST, request.FILES, instance=request.user)
 
             if form.is_valid():
@@ -220,8 +203,6 @@ class UsersettingsView(TemplateView):
                     request.user.avatar.delete()
                     request.user.avatar = None
                     request.user.save()
-                if tempavatar is not None:
-                    tempavatar.storage.delete(tempavatar)
                 form.save()
             context["avatarform"] = form
 
@@ -231,14 +212,14 @@ class UsersettingsView(TemplateView):
 class DepartmentList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = Department
     context_object_name = 'department_list'
-    permission_required = "users.read_department"
+    permission_required = "users.view_department"
 
     def get_queryset(self):
         sections = Department.objects.all()
-        self.filterstring = self.kwargs.pop("filter", None)
+        self.filterstring = self.request.GET.get("filter", None)
         if self.filterstring:
             sections = sections.filter(name__icontains=self.filterstring)
-        self.viewsorting = self.kwargs.pop("sorting", "name")
+        self.viewsorting = self.request.GET.get("sorting", "name")
         if self.viewsorting in [s[0] for s in VIEWSORTING]:
             sections = sections.order_by(self.viewsorting)
         return sections
@@ -248,9 +229,9 @@ class DepartmentList(PermissionRequiredMixin, PaginationMixin, ListView):
         context = super().get_context_data(**kwargs)
         context["breadcrumbs"] = [
             (reverse("department-list"), _("Departments"))]
-        context["viewform"] = ViewForm(initial={"viewsorting": self.viewsorting})
+        context["viewform"] = ViewForm(initial={"sorting": self.viewsorting})
         if self.filterstring:
-            context["filterform"] = FilterForm(initial={"filterstring": self.filterstring})
+            context["filterform"] = FilterForm(initial={"filter": self.filterstring})
         else:
             context["filterform"] = FilterForm()
         if context["is_paginated"] and context["page_obj"].number > 1:
@@ -285,7 +266,7 @@ class DepartmentDetail(PermissionRequiredMixin, DetailView):
     model = Department
     context_object_name = 'department'
     template_name = "users/department_detail.html"
-    permission_required = "users.read_department"
+    permission_required = "users.view_department"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -308,6 +289,7 @@ class DepartmentDetail(PermissionRequiredMixin, DetailView):
 
 class DepartmentUpdate(PermissionRequiredMixin, UpdateView):
     model = Department
+    fields = "__all__"
     success_url = reverse_lazy('department-list')
     template_name = 'devices/base_form.html'
     permission_required = 'users.change_department'
@@ -368,8 +350,11 @@ class DepartmentAddUser(FormView):
     def form_valid(self, form):
         self.department = get_object_or_404(Department, id=self.kwargs.get("pk", ""))
         if self.department not in form.cleaned_data["user"].departments.all():
-            department_user = DepartmentUser(user=form.cleaned_data["user"], department=form.cleaned_data["department"],
-                                            role=form.cleaned_data["role"])
+            department_user = DepartmentUser(
+                user=form.cleaned_data["user"],
+                department=form.cleaned_data["department"],
+                role=form.cleaned_data["role"],
+            )
             department_user.save()
             if form.cleaned_data["user"].main_department is None:
                 form.cleaned_data["user"].main_department = form.cleaned_data["department"]

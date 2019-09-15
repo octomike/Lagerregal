@@ -1,13 +1,10 @@
-import unittest
-
-from django.test.client import Client
 from django.test import TestCase
+from django.test.client import Client
 from django.urls import reverse
-from django.contrib.contenttypes.models import ContentType
 
 from model_mommy import mommy
 
-from mail.models import MailTemplate, MailTemplateRecipient, MailHistory
+from mail.models import MailTemplate
 from users.models import Lageruser
 
 
@@ -28,45 +25,20 @@ class TestMailTemplate(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_create_view(self):
-        response = self.client.get('/mails/add')
+        response = self.client.get('/mails/add/')
         self.assertEqual(response.status_code, 200)
 
     def test_detail_view(self):
         template = mommy.make(MailTemplate)
-        response = self.client.get('/mails/view/%i' % template.pk)
+        response = self.client.get('/mails/%i/' % template.pk)
         self.assertEqual(response.status_code, 200)
 
     def test_update_view(self):
         template = mommy.make(MailTemplate)
-        response = self.client.get('/mails/edit/%i' % template.pk)
+        response = self.client.get('/mails/%i/edit/' % template.pk)
         self.assertEqual(response.status_code, 200)
 
     def test_delete_view(self):
         template = mommy.make(MailTemplate)
-        response = self.client.get('/mails/delete/%i' % template.pk)
+        response = self.client.get('/mails/%i/delete/' % template.pk)
         self.assertEqual(response.status_code, 200)
-
-
-class TestMailTemplateRecipient(TestCase):
-    def setUp(self):
-        self.client = Client()
-        Lageruser.objects.create_superuser("test", "test@test.com", "test")
-        self.client.login(username="test", password="test")
-
-    @unittest.skip("first figuring out strange behaviour of content_object")
-    def test_template_creation(self):
-        con = mommy.make(ContentType)
-        rec = mommy.make(MailTemplateRecipient, content_type=con)
-        self.assertEqual(str(rec), str(rec.content_type.name + ": " + str(rec.content_object)))
-
-
-class TestMailHistory(TestCase):
-    def setUp(self):
-        self.client = Client()
-        Lageruser.objects.create_superuser("test", "test@test.com", "test")
-        self.client.login(username="test", password="test")
-
-    @unittest.skip("find out why url does not exist")
-    def test_mail_history_creation(self):
-        hist = mommy.make(MailHistory)
-        self.assertEqual(hist.get_absolute_url(), reverse('mailhistory-detail', kwargs={'pk': hist.pk}))

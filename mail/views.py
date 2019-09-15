@@ -1,20 +1,26 @@
-from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
-from django.urls import reverse_lazy, reverse
-from django.utils.translation import ugettext_lazy as _
 from django.contrib.auth.models import Group
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
+from django.urls import reverse_lazy
+from django.utils.translation import ugettext_lazy as _
+from django.views.generic import CreateView
+from django.views.generic import DeleteView
+from django.views.generic import DetailView
+from django.views.generic import ListView
+from django.views.generic import UpdateView
 
-from mail.models import MailTemplate, MailTemplateRecipient
+from Lagerregal.utils import PaginationMixin
 from mail.forms import MailTemplateForm
+from mail.models import MailTemplate
+from mail.models import MailTemplateRecipient
 from users.mixins import PermissionRequiredMixin
 from users.models import Lageruser
-from Lagerregal.utils import PaginationMixin
 
 
 class MailList(PermissionRequiredMixin, PaginationMixin, ListView):
     model = MailTemplate
     context_object_name = 'mail_list'
-    permission_required = 'mail.read_mailtemplate'
+    permission_required = 'mail.view_mailtemplate'
 
     def get_queryset(self):
         return MailTemplate.objects.all()
@@ -34,7 +40,7 @@ class MailDetail(PermissionRequiredMixin, DetailView):
     model = MailTemplate
     context_object_name = 'mailtemplate'
     template_name = "mail/mailtemplate_detail.html"
-    permission_required = 'mail.read_mailtemplate'
+    permission_required = 'mail.view_mailtemplate'
 
     def get_context_data(self, **kwargs):
         # Call the base implementation first to get a context

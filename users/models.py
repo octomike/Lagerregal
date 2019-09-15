@@ -1,14 +1,14 @@
+import logging
 import re
 from datetime import date
-import logging
 
-from django.db import models
-from django.contrib.auth.models import AbstractUser
-from django.utils.translation import ugettext_lazy as _
-from django.core.validators import MaxValueValidator
 from django.conf import settings
-from django.urls import reverse
+from django.contrib.auth.models import AbstractUser
+from django.core.validators import MaxValueValidator
+from django.db import models
 from django.dispatch import receiver
+from django.urls import reverse
+from django.utils.translation import ugettext_lazy as _
 
 import pytz
 from django_auth_ldap.backend import populate_user
@@ -42,9 +42,6 @@ class Lageruser(AbstractUser):
     class Meta:
         verbose_name = _('User')
         verbose_name_plural = _('Users')
-        permissions = (
-            ("read_user", _("Can read User")),
-        )
         ordering = ['username']
 
     def get_absolute_url(self):
@@ -116,7 +113,6 @@ class Department(models.Model):
         verbose_name = _('Department')
         verbose_name_plural = _('Departments')
         permissions = (
-            ("read_department", _("Can read Departments")),
             ("add_department_user", _("Can add a User to a Department")),
             ("delete_department_user", _("Can remove a User from a Department")),)
 

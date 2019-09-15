@@ -2,9 +2,9 @@ from django import forms
 
 from django_select2.forms import Select2MultipleWidget
 
+from devices.forms import get_emailrecipientlist
 from mail.models import USAGES
 from mail.models import MailTemplate
-from devices.forms import get_emailrecipientlist
 
 
 class MailTemplateForm(forms.ModelForm):
@@ -28,7 +28,7 @@ class MailTemplateForm(forms.ModelForm):
     error_css_class = 'has-error'
     body = forms.CharField(widget=forms.Textarea())
     default_recipients = forms.MultipleChoiceField(required=False,
-                                                   widget=Select2MultipleWidget(attrs={'style': 'width:100%;'}))
+                                                   widget=Select2MultipleWidget())
 
     class Meta:
         model = MailTemplate

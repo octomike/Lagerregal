@@ -1,19 +1,19 @@
 {% load i18n %}
 {% load devicetags %}
 
-<table id="puppetdetails_table" class="table table-bordered table-striped table-wrapped">
+<table class="table table-bordered table-striped table-wrapped" data-table data-bfilter="false">
     <thead>
-    <tr>
-        <th>{% trans "Fact" %}</th>
-        <th>{% trans "Value" %}</th>
-    </tr>
+        <tr>
+            <th>{% trans "Fact" %}</th>
+            <th>{% trans "Value" %}</th>
+        </tr>
     </thead>
     <tbody>
-      {% for fact in puppetdetails %}
-      <tr>
-        <td id="puppetdetails_name">{{ fact.name }}</td>
-        <td id="puppetdetails_value">{% as_nested_list fact.value %}</td>
-      </tr>
-      {% endfor %}
+        {% for fact in puppetdetails %}
+            <tr>
+                <td id="puppetdetails_name">{{ fact.name }}</td>
+                <td id="puppetdetails_value">{% as_nested_list fact.value %}</td>
+            </tr>
+        {% endfor %}
     </tbody>
 </table>

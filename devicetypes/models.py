@@ -1,6 +1,6 @@
 from django.db import models
-from django.utils.translation import ugettext_lazy as _
 from django.urls import reverse
+from django.utils.translation import ugettext_lazy as _
 
 from reversion import revisions as reversion
 
@@ -15,9 +15,6 @@ class Type(models.Model):
     class Meta:
         verbose_name = _('Type')
         verbose_name_plural = _('Types')
-        permissions = (
-            ("read_type", _("Can read Type")),
-        )
 
     def get_absolute_url(self):
         return reverse('type-detail', kwargs={'pk': self.pk})

@@ -1,7 +1,6 @@
 # Django settings for Lagerregal project.
 import os
 
-
 # Local time zone for this installation. Choices can be found here:
 # http://en.wikipedia.org/wiki/List_of_tz_zones_by_name
 # although not all choices may be available on all operating systems.
@@ -178,13 +177,23 @@ LOGGING = {
     }
 }
 
+# get more themes from https://bootswatch.com/ and download them to:
+#   static/css/themes/<name>.min.css
+THEMES = [
+    'flatly',
+    'darkly',
+    'simplex',
+    'superhero',
+    'united',
+]
+
 NPM_ROOT_PATH = os.getcwd()
 
 NPM_FILE_PATTERNS = {
     'bootstrap': [
         'dist/js/bootstrap.min.js',
     ],
-    'bootswatch': ['*/bootstrap.min.css'],
+    'bootswatch': ['dist/{}/bootstrap.min.css'.format(t) for t in THEMES],
     'font-awesome': [
         'css/font-awesome.min.css',
         'fonts/*',
@@ -195,16 +204,21 @@ NPM_FILE_PATTERNS = {
         'jquery-ui.min.css',
         'images/*.png',
     ],
-    'datatables': [
-        'media/css/jquery.dataTables.min.css',
-        'media/images/*.png',
-        'media/js/jquery.dataTables.min.js',
+    'datatables.net': [
+        'js/jquery.dataTables.min.js',
+    ],
+    'datatables.net-bs4': [
+        'css/dataTables.bootstrap4.min.css',
+        'js/dataTables.bootstrap4.min.js',
     ],
     'mustache': ['mustache.min.js'],
     'noty': [
         'js/noty/jquery.noty.js',
         'js/noty/layouts/*.js',
         'js/noty/themes/*.js',
+    ],
+    'popper.js': [
+        'dist/umd/popper.min.js',
     ],
     'select2': [
         'dist/js/select2.min.js',
@@ -217,17 +231,6 @@ NPM_FILE_PATTERNS = {
 }
 
 PUBLIC_DEVICES_FILTER = {"tags__id__in": ["3", "17"]}
-
-# get more themes from https://bootswatch.com/ and download them to:
-#   static/css/themes/<name>.min.css
-THEMES = [
-    'flatly',
-    'darkly',
-    'simplex',
-    'superhero',
-    'united',
-    'paper',
-]
 
 FAVICON_PATH = STATIC_URL + 'images/favicon.ico'
 
